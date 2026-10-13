@@ -85,8 +85,10 @@ def fetch_events(
     raw = post_form(f"{base_url}/Home/GetCalendarData", fields)
     if not raw.strip():
         raise RuntimeError(
-            f"GetCalendarData returned an empty body for {federation_ids}: "
-            "CELCAT does not know these federation ids (list emptied or renamed?)"
+            f"GetCalendarData at {base_url} returned HTTP 200 with an empty body "
+            f"for federation ids {federation_ids}. CELCAT does this when an id is "
+            "unknown (renamed or removed), and possibly on a server fault. "
+            "Check the id in the CELCAT web list, then retry later."
         )
     events = json.loads(raw)
     if not isinstance(events, list):
