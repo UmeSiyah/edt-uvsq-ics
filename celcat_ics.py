@@ -83,6 +83,11 @@ def fetch_events(
     ]
     fields += [("federationIds[]", fid) for fid in federation_ids]
     raw = post_form(f"{base_url}/Home/GetCalendarData", fields)
+    if not raw.strip():
+        raise RuntimeError(
+            f"GetCalendarData returned an empty body for {federation_ids}: "
+            "CELCAT does not know these federation ids (list emptied or renamed?)"
+        )
     events = json.loads(raw)
     if not isinstance(events, list):
         raise RuntimeError(f"unexpected payload from GetCalendarData: {type(events)}")
