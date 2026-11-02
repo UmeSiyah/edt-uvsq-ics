@@ -15,7 +15,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import html
+import http.cookiejar
 import json
+import os
 import re
 import sys
 import time
@@ -45,7 +47,13 @@ USER_AGENT = "socal-celcat-ics/1.0"
 # --------------------------------------------------------------------------
 
 
-def post_form(url: str, fields: list[tuple[str, str]], *, retries: int = 3) -> bytes:
+def post_form(
+    url: str,
+    fields: list[tuple[str, str]],
+    *,
+    opener: urllib.request.OpenerDirector | None = None,
+    retries: int = 3,
+) -> bytes:
     """POST a urlencoded form and return the raw response body."""
     body = urllib.parse.urlencode(fields).encode("utf-8")
     headers = {
@@ -54,11 +62,12 @@ def post_form(url: str, fields: list[tuple[str, str]], *, retries: int = 3) -> b
         "Accept": "application/json, text/javascript, */*; q=0.01",
         "User-Agent": USER_AGENT,
     }
+    open_url = opener.open if opener is not None else urllib.request.urlopen
     last_error: Exception | None = None
     for attempt in range(retries):
         try:
             request = urllib.request.Request(url, data=body, headers=headers)
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with open_url(request, timeout=60) as response:
                 return response.read()
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             last_error = error
@@ -67,12 +76,63 @@ def post_form(url: str, fields: list[tuple[str, str]], *, retries: int = 3) -> b
     raise RuntimeError(f"POST {url} failed after {retries} attempts: {last_error}")
 
 
+def make_session() -> urllib.request.OpenerDirector:
+    """Opener that keeps cookies, so an authenticated session survives requests."""
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
+    )
+    opener.addheaders = [("User-Agent", USER_AGENT)]
+    return opener
+
+
+def login(base_url: str, username: str, password: str, opener) -> None:
+    """Open an authenticated session against the CELCAT LDAP login.
+
+    The web UI posts Name/Password plus the antiforgery token to
+    /LdapLogin/Logon; on success the server redirects away from the login
+    page and sets the session cookie. Credentials are never logged and
+    never appear in error messages.
+    """
+    with opener.open(f"{base_url}/LdapLogin", timeout=60) as response:
+        page = response.read().decode("utf-8", "replace")
+    match = re.search(
+        r'name="__RequestVerificationToken"[^>]*value="([^"]+)"', page
+    )
+    if not match:
+        raise RuntimeError(f"no antiforgery token found on {base_url}/LdapLogin")
+    body = urllib.parse.urlencode(
+        [
+            ("Name", username),
+            ("Password", password),
+            ("RememberMe", "false"),
+            ("__RequestVerificationToken", match.group(1)),
+        ]
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base_url}/LdapLogin/Logon",
+        data=body,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "Referer": f"{base_url}/LdapLogin",
+        },
+    )
+    with opener.open(request, timeout=60) as response:
+        landing = response.geturl()
+        landing_page = response.read().decode("utf-8", "replace")
+    if "/LdapLogin" in landing or "incorrect" in landing_page.lower():
+        raise RuntimeError(
+            f"CELCAT login at {base_url} rejected the credentials for user "
+            f"{username!r}; check the CELCAT_USERNAME/CELCAT_PASSWORD secrets"
+        )
+
+
 def fetch_events(
     base_url: str,
     federation_ids: list[str],
     resource_type: str,
     start: date,
     end: date,
+    opener: urllib.request.OpenerDirector | None = None,
 ) -> list[dict]:
     fields = [
         ("start", start.isoformat()),
@@ -82,7 +142,7 @@ def fetch_events(
         ("colourScheme", "3"),
     ]
     fields += [("federationIds[]", fid) for fid in federation_ids]
-    raw = post_form(f"{base_url}/Home/GetCalendarData", fields)
+    raw = post_form(f"{base_url}/Home/GetCalendarData", fields, opener=opener)
     if not raw.strip():
         raise RuntimeError(
             f"GetCalendarData at {base_url} returned HTTP 200 with an empty body "
@@ -97,13 +157,18 @@ def fetch_events(
 
 
 def fetch_display_names(
-    base_url: str, federation_ids: list[str], resource_type: str
+    base_url: str,
+    federation_ids: list[str],
+    resource_type: str,
+    opener: urllib.request.OpenerDirector | None = None,
 ) -> dict[str, str]:
     """Return {federationId: human readable name}. Best effort, never raises."""
     fields = [("resType", resource_type)]
     fields += [("federationIds[]", fid) for fid in federation_ids]
     try:
-        raw = post_form(f"{base_url}/Home/LoadDisplayNames", fields, retries=2)
+        raw = post_form(
+            f"{base_url}/Home/LoadDisplayNames", fields, opener=opener, retries=2
+        )
         entries = json.loads(raw)
     except Exception:
         return {}
@@ -353,6 +418,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--out", required=True, type=Path, help="output .ics path")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument(
+        "--username",
+        default=os.environ.get("CELCAT_USERNAME"),
+        help="CELCAT/LDAP username (default: $CELCAT_USERNAME). "
+        "Required when the server sits behind the LDAP login.",
+    )
+    parser.add_argument(
+        "--password",
+        default=os.environ.get("CELCAT_PASSWORD"),
+        help="CELCAT/LDAP password (default: $CELCAT_PASSWORD). Never logged.",
+    )
+    parser.add_argument(
         "--res-type",
         default=RESOURCE_TYPE_GROUP,
         help="103=group, 100=staff, 104=student (default 103)",
@@ -383,7 +459,20 @@ def main(argv: list[str] | None = None) -> int:
     start = today - timedelta(days=args.days_back)
     end = today + timedelta(days=args.days_ahead)
 
-    raw_events = fetch_events(args.base_url, args.fid, args.res_type, start, end)
+    opener = None
+    if args.username and args.password:
+        opener = make_session()
+        login(args.base_url, args.username, args.password, opener)
+    elif args.username or args.password:
+        print(
+            "both --username and --password (or CELCAT_USERNAME and "
+            "CELCAT_PASSWORD) are required to authenticate; continuing anonymously",
+            file=sys.stderr,
+        )
+
+    raw_events = fetch_events(
+        args.base_url, args.fid, args.res_type, start, end, opener
+    )
     courses = [course for course in map(parse_event, raw_events) if course]
 
     if len(courses) < args.min_events:
@@ -396,7 +485,7 @@ def main(argv: list[str] | None = None) -> int:
 
     name = args.name
     if not name:
-        display = fetch_display_names(args.base_url, args.fid, args.res_type)
+        display = fetch_display_names(args.base_url, args.fid, args.res_type, opener)
         name = " + ".join(display.get(fid, fid) for fid in args.fid)
 
     namespace = f"{args.base_url}|{args.res_type}|{','.join(sorted(args.fid))}"

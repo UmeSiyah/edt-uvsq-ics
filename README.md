@@ -38,6 +38,27 @@ Options utiles :
 | `--days-back N` | Profondeur du passé, 120 jours par défaut. |
 | `--days-ahead N` | Profondeur du futur, 400 jours par défaut. |
 | `--min-events N` | Refuse d'écrire en dessous de ce seuil. |
+| `--username NOM` | Identifiant LDAP (défaut : variable `CELCAT_USERNAME`). |
+| `--password MOTDEPASSE` | Mot de passe LDAP (défaut : variable `CELCAT_PASSWORD`). Jamais affiché. |
+
+## Authentification
+
+Depuis que `edt.uvsq.fr` est protégé par une connexion LDAP, l'endpoint
+`GetCalendarData` renvoie un corps vide sans session authentifiée. Le script
+s'authentifie alors automatiquement si des identifiants sont fournis :
+
+```bash
+export CELCAT_USERNAME="prenom.nom"
+export CELCAT_PASSWORD="********"
+python3 celcat_ics.py --fid HISL2TD1 --out docs/hisl2td1.ics
+```
+
+En local, passe les options `--username` / `--password` ou les variables
+d'environnement. Dans GitHub Actions, les deux secrets du dépôt
+`CELCAT_USERNAME` et `CELCAT_PASSWORD` sont injectés dans l'environnement du
+workflow (voir `.github/workflows/update-calendars.yml`). Ne commit jamais de
+mot de passe : les secrets GitHub sont masqués dans les logs, mais pas dans un
+fichier du dépôt.
 
 Le script ne réécrit pas le fichier si le planning n'a pas bougé. Il compare un
 hash du contenu stocké dans l'en-tête `X-CELCAT-CONTENT-HASH`.
@@ -77,7 +98,9 @@ CALENDARS=(
 
 1. Settings → Pages → Source : `Deploy from a branch`, branche `main`, dossier `/docs`.
 2. Settings → Actions → General → Workflow permissions : `Read and write permissions`.
-3. Actions → `Update calendars` → `Run workflow`.
+3. Settings → Secrets and variables → Actions : créer les secrets `CELCAT_USERNAME`
+   et `CELCAT_PASSWORD` si `edt.uvsq.fr` exige une connexion.
+4. Actions → `Update calendars` → `Run workflow`.
 
 Vérifie ensuite le type MIME, que certains clients exigent :
 
@@ -141,8 +164,9 @@ est donc mis à jour, pas dupliqué.
   elle renvoie simplement moins d'événements.
 - Le champ note de CELCAT est du texte libre. Son contenu varie selon le
   département qui saisit le planning.
-- Si l'université ferme l'endpoint ou ajoute une authentification, le script
-  casse. Il n'y a pas de contournement prévu.
+- Si l'université ferme l'endpoint, le script échoue. Si elle ajoute une
+  authentification, il faut des identifiants valides dans les secrets
+  `CELCAT_USERNAME` / `CELCAT_PASSWORD` (voir section Authentification).
 - GitHub désactive un workflow planifié après 60 jours sans activité sur le
   dépôt. Pendant l'année les commits du bot suffisent à le garder actif, mais
   l'été peut dépasser ce seuil. GitHub prévient par mail, un clic réactive.
