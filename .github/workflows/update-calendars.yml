@@ -55,10 +55,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- docs; then
+          # Stage first: git diff alone misses brand-new feeds (untracked).
+          git add docs
+          if git diff --cached --quiet -- docs; then
             echo "No schedule change."
             exit 0
           fi
-          git add docs
           git commit -m "chore: refresh calendars ($(date -u +%Y-%m-%d))"
           git push
