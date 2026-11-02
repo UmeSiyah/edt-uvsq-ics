@@ -79,6 +79,7 @@ https://edt.uvsq.fr/cal?vt=month&dt=2026-09-12&et=group&fid0=HISL2TD1
 
 ```
 https://umesiyah.github.io/edt-uvsq-ics/hisl2td1.ics
+https://umesiyah.github.io/edt-uvsq-ics/lhgeo2_26.ics
 ```
 
 Page d'abonnement : <https://umesiyah.github.io/edt-uvsq-ics/>
