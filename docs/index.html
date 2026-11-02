@@ -67,6 +67,15 @@
   Outlook ou Thunderbird en mode abonnement. Sur Google Agenda, copie l'URL.</p>
 </div>
 
+<div class="feed">
+  <h3>GÉOGRAPHIE - L2 - 26</h3>
+  <div class="row">
+    <input id="u2" readonly value="https://umesiyah.github.io/edt-uvsq-ics/lhgeo2_26.ics">
+    <button type="button" id="c2">Copier</button>
+    <a class="btn" href="webcal://umesiyah.github.io/edt-uvsq-ics/lhgeo2_26.ics">S'abonner</a>
+  </div>
+</div>
+
 <h2>Où coller l'URL</h2>
 <dl>
   <dt>Google Agenda</dt>
@@ -97,18 +106,20 @@ c'est un import : supprime-le et recommence.</p>
 24 h. Apple Calendar et Thunderbird laissent régler l'intervalle toi-même.</p>
 
 <script>
-  const field = document.getElementById('u');
-  const button = document.getElementById('c');
-  button.addEventListener('click', async () => {
-    field.select();
-    try {
-      await navigator.clipboard.writeText(field.value);
-    } catch {
-      document.execCommand('copy');
-    }
-    button.textContent = 'Copié';
-    setTimeout(() => { button.textContent = 'Copier'; }, 1500);
-  });
+  for (const [fieldId, buttonId] of [['u', 'c'], ['u2', 'c2']]) {
+    const field = document.getElementById(fieldId);
+    const button = document.getElementById(buttonId);
+    button.addEventListener('click', async () => {
+      field.select();
+      try {
+        await navigator.clipboard.writeText(field.value);
+      } catch {
+        document.execCommand('copy');
+      }
+      button.textContent = 'Copié';
+      setTimeout(() => { button.textContent = 'Copier'; }, 1500);
+    });
+  }
 </script>
 </body>
 </html>
